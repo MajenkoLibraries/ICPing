@@ -34,17 +34,79 @@ void ICPing::begin() {
     pinMode(_trig_pin, OUTPUT);
     pinMode(_echo_pin, INPUT);
     _trig_port = getPortInformation(_trig_pin, &_trig_mask);
-    _echo_port = getPortInformation(_echo_pin, &_echo_mask);
 
     uint16_t timer = digitalPinToTimerIC(_echo_pin);
     if (timer == 0) {
         // Not an IC pin!!!!
         return;
     }
+#ifdef __PIC32_PPS__
+    unlockPps();
+    switch (timer) {
+        case _TIMER_IC1:
+            mapPps(_echo_pin, PPS_IN_IC1);
+            _irq = _INPUT_CAPTURE_1_IRQ;
+            _vector = _INPUT_CAPTURE_1_VECTOR;
+            _reg = (p32_ic *)&IC1CON;
+            break;
+        case _TIMER_IC2:
+            mapPps(_echo_pin, PPS_IN_IC2);
+            _irq = _INPUT_CAPTURE_2_IRQ;
+            _vector = _INPUT_CAPTURE_2_VECTOR;
+            _reg = (p32_ic *)&IC2CON;
+            break;
+        case _TIMER_IC3:
+            mapPps(_echo_pin, PPS_IN_IC3);
+            _irq = _INPUT_CAPTURE_3_IRQ;
+            _vector = _INPUT_CAPTURE_3_VECTOR;
+            _reg = (p32_ic *)&IC3CON;
+            break;
+        case _TIMER_IC4:
+            mapPps(_echo_pin, PPS_IN_IC4);
+            _irq = _INPUT_CAPTURE_4_IRQ;
+            _vector = _INPUT_CAPTURE_4_VECTOR;
+            _reg = (p32_ic *)&IC4CON;
+            break;
+        case _TIMER_IC5:
+            mapPps(_echo_pin, PPS_IN_IC5);
+            _irq = _INPUT_CAPTURE_5_IRQ;
+            _vector = _INPUT_CAPTURE_5_VECTOR;
+            _reg = (p32_ic *)&IC5CON;
+            break;
+    }
+    lockPps();
+#else
+    switch (timer) {
+        case _TIMER_IC1:
+            _irq = _INPUT_CAPTURE_1_IRQ;
+            _vector = _INPUT_CAPTURE_1_VECTOR;
+            _reg = (p32_ic *)&IC1CON;
+            break;
+        case _TIMER_IC2:
+            _irq = _INPUT_CAPTURE_2_IRQ;
+            _vector = _INPUT_CAPTURE_2_VECTOR;
+            _reg = (p32_ic *)&IC2CON;
+            break;
+        case _TIMER_IC3:
+            _irq = _INPUT_CAPTURE_3_IRQ;
+            _vector = _INPUT_CAPTURE_3_VECTOR;
+            _reg = (p32_ic *)&IC3CON;
+            break;
+        case _TIMER_IC4:
+            _irq = _INPUT_CAPTURE_4_IRQ;
+            _vector = _INPUT_CAPTURE_4_VECTOR;
+            _reg = (p32_ic *)&IC4CON;
+            break;
+        case _TIMER_IC5:
+            _irq = _INPUT_CAPTURE_5_IRQ;
+            _vector = _INPUT_CAPTURE_5_VECTOR;
+            _reg = (p32_ic *)&IC5CON;
+            break;
+    }
+#endif
+
     // Convert to a zero-based index of IC timer number
     timer = (timer >> _BN_TIMER_IC) - 1;
-    _reg = (p32_ic *)(&IC1CON + (0x200 * timer));
-
     _reg->icxCon.reg = 0;
     _reg->icxCon.set = 1 << 9; // Capture rising edge first
     //_reg->icxCon.set = 1 << 5; // Interrupt on every second event
@@ -97,20 +159,20 @@ void ICPing::begin() {
         _usPerTick = (1000000.0 / baseclock);
         PR3 = 0xFFFF;
         T3CONbits.TON = 1;
-        setIntVector(_TIMER_3_IRQ, ICPing::freeRunHandler);
-        setIntPriority(_TIMER_3_IRQ, 2, 0);
+        setIntVector(_TIMER_3_VECTOR, ICPing::freeRunHandler);
+        setIntPriority(_TIMER_3_VECTOR, 2, 0);
         clearIntFlag(_TIMER_3_IRQ);
         setIntEnable(_TIMER_3_IRQ);
         _timerConfigured = true;
     }
 
     _ready = false;
-    _irq = _INPUT_CAPTURE_1_IRQ + (timer * 4);
-    setIntVector(_irq, ICPing::interruptHandler);
-    setIntPriority(_irq, 4, 0);
+    setIntVector(_vector, ICPing::interruptHandler);
+    setIntPriority(_vector, 4, 0);
     clearIntFlag(_irq);
     setIntEnable(_irq);
     _handlers[timer] = this;
+    pinMode(PIN_LED1, OUTPUT);
     
 }
 
@@ -150,22 +212,21 @@ void ICPing::handleFreeRun() {
 
 void ICPing::handleInterrupt() {
     if (getIntFlag(_irq)) {
-        clearIntFlag(_irq);
         if (_first) {
             _start = _reg->icxBuf.reg;
             _first = false;
-            return;
+        } else {
+            _end = _reg->icxBuf.reg;
+            // We have received our ping, so turn ourselves off.
+            _reg->icxCon.clr = 1 << 15;
+
+            uint16_t time = _end - _start;
+            _ready = true;
+            uint32_t us = time * _usPerTick;
+            double mm = ((double)us / 5.82);
+            _mm = (uint32_t)mm;
         }
-
-        _end = _reg->icxBuf.reg;
-        // We have received our ping, so turn ourselves off.
-        _reg->icxCon.clr = 1 << 15;
-
-        uint16_t time = _end - _start;
-        _ready = true;
-        uint32_t us = time * _usPerTick;
-        double mm = ((double)us / 5.82);
-        _mm = (uint32_t)mm;
+        clearIntFlag(_irq);
     }
 }
 

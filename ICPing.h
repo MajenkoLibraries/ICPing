@@ -49,10 +49,9 @@ class ICPing {
         volatile p32_ic *_reg;
         volatile uint32_t _mm;
         p32_ioport *_trig_port;
-        p32_ioport *_echo_port;
         uint32_t _trig_mask;
-        uint32_t _echo_mask;
         uint32_t _irq;
+        uint32_t _vector;
         volatile bool _ready;
         volatile bool _first;
         volatile uint16_t _start;
